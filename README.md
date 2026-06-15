@@ -22,7 +22,8 @@ WebSocket (WSS) -> Telegram DC
 ## Быстрый старт
 
 ```bash
-curl -fsSL https://insage.ru/mtproxy/install.sh | sudo bash
+curl -fsSL https://insage.ru/mtproxy/install.sh -o install.sh
+sudo bash install.sh
 ```
 
 Голый вызов спросит параметры в терминале. Любой переданный флаг => неинтерактивный режим.
