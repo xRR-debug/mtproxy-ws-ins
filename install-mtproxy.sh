@@ -54,7 +54,7 @@ mtproxy-ws-ins - установка MTProto-прокси (tg-ws-proxy + zapret).
 
 Одной строкой:
   curl -fsSL ${SELF_URL} | sudo bash
-  curl -fsSL ${SELF_URL} | sudo bash -s -- --port 443 --server alt2.insage.ru --domain max.ru --cf-prefix node --dpi-bypass
+  curl -fsSL ${SELF_URL} | sudo bash -s -- --port 443 --server yourserverxd --domain max.ru --cf-prefix node --dpi-bypass
 
 Флаги:
   --port N             порт MTProto (по умолч. 443)
