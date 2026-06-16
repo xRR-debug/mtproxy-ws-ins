@@ -22,7 +22,7 @@ WebSocket (WSS) -> Telegram DC
 ## Быстрый старт
 
 ```bash
-sudo bash <(curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh)
+sudo bash <(curl -fsSL https://raw.githubusercontent.com/xRR-debug/mtproxy-ws-ins/main/install.sh)
 ```
 
 Голый вызов спросит параметры в терминале. Любой переданный флаг => неинтерактивный режим.
@@ -30,7 +30,7 @@ sudo bash <(curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/m
 Пример конфига MTProto без Fake-TLS, своя зона CfProxy, закреплённый сикрет
 
 ```bash
-curl -fsSL https://insage.ru/mtproxy/install.sh | sudo bash -s -- --yes \
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --yes \
   --secret <32-hex> \
   --port 443 --server <твой-домен-или-IP> \
   --cfproxy-domain <твой домен проксируемый в CF> --cf-prefix node \
@@ -39,7 +39,7 @@ curl -fsSL https://insage.ru/mtproxy/install.sh | sudo bash -s -- --yes \
 
 Пример конфига MTProto без Fake-TLS, встроенные CfProxy-домены (свою Cloudflare/DNS поднимать не нужно)
 ```bash
-curl -fsSL https://insage.ru/mtproxy/install.sh | sudo bash -s -- --yes \
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --yes \
   --secret <32-hex> \
   --port 443 --server <твой-домен-или-IP> \
   --builtin-cfproxy --no-fake-tls --dpi-bypass
@@ -48,7 +48,7 @@ curl -fsSL https://insage.ru/mtproxy/install.sh | sudo bash -s -- --yes \
 
 Пример конфига MTProto с Fake-TLS (маскировка под --domain, ee-сикрет) - без --no-fake-tls, нужен живой HTTPS-сайт в --domain
 ```bash
-curl -fsSL https://insage.ru/mtproxy/install.sh | sudo bash -s -- --yes \
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --yes \
   --secret <32-hex> \
   --port 443 --server <твой-домен-или-IP> --domain max.ru \
   --cfproxy-domain <твой домен проксируемый в CF> --cf-prefix node \
@@ -121,7 +121,7 @@ journalctl -u mtproxy-ws -f | grep stats     # трафик: down/up
 systemctl restart mtproxy-ws                 # сбрасывает подвисшие CfProxy-сессии
 systemctl stop|disable mtproxy-ws
 
-curl -fsSL https://insage.ru/mtproxy/install.sh | sudo bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --uninstall
 ```
 
 Конфиг: `/etc/mtproxy-ws/proxy.conf` (после правки → `systemctl restart mtproxy-ws`). Wrapper: `/opt/tg-ws-proxy/run-server.sh`.
