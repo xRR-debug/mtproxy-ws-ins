@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 # mtproxy-ws-ins: Flowseal/tg-ws-proxy + zapret.
-# Установка (интерактив):  sudo bash <(curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh)
-# Или с флагами:           curl -fsSL <url> | sudo bash -s -- --yes ФЛАГИ
-# Все флаги: --help
 set -euo pipefail
 
 ORIG_ARGC=$#
