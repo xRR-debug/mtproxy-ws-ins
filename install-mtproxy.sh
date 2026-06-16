@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # mtproxy-ws-ins: Flowseal/tg-ws-proxy + zapret.
-# Установка: curl -fsSL https://insage.ru/mtproxy/install.sh | sudo bash [-s -- ФЛАГИ]
+# Установка (интерактив):  sudo bash <(curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh)
+# Или с флагами:           curl -fsSL <url> | sudo bash -s -- --yes ФЛАГИ
 # Все флаги: --help
 set -euo pipefail
 
 ORIG_ARGC=$#
 
-REPO_URL="https://github.com/Flowseal/tg-ws-proxy.git"
+REPO_URL="https://github.com/xRR-debug/tg-ws-proxy.git"
+REPO_REF="main"          # ветка
 ZAPRET_URL="https://github.com/bol-van/zapret.git"
 APP_DIR="/opt/tg-ws-proxy"
 VENV_DIR="${APP_DIR}/.venv"
@@ -21,21 +23,22 @@ SVC_NFQWS="mtproxy-ws-nfqws.service"
 SVC_IPT="mtproxy-ws-iptables.service"
 QNUM=201
 MSS=536
-BASE_URL="https://insage.ru/mtproxy"
+BASE_URL="https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main"
 SELF_URL="${BASE_URL}/install.sh"
 
 # ===== ДЕФОЛТЫ - МЕНЯТЬ ЗДЕСЬ (или флагами при запуске) =====
 PORT="443"
 SERVER=""                 # пусто => берётся DOMAIN
-DOMAIN="insage.ru"        # Fake-TLS; для --no-fake-tls не используется
+DOMAIN="max.ru"             # Fake-TLS; для --no-fake-tls не используется
 SECRET=""                 # пусто => генерируется; ЗАКРЕПИ свой, чтобы ссылка не менялась
 CFPROXY_DOMAIN=""         # пусто => база от DOMAIN
 CFPROXY_DISABLE=0
 CF_PREFIX="kws"           # префикс CfProxy-субдоменов (<prefix>1..5,203)
 DPI_BYPASS=""
-NO_FAKE_TLS=0             # 1 = обычный MTProto (dd), без TLS/SNI - пробивает моб. TSPU
+NO_FAKE_TLS=0             # 1 = обычный MTProto (dd)
 WS_KEEPALIVE="30"
 NFQWS_OPTS="--dpi-desync=fake --dpi-desync-ttl=6 --dpi-desync-fooling=md5sig"  # zapret
+LOG_LEVEL="info"          # info|warning|error|off - off/error = без логов подключений (IP/сессий)
 ASSUME_YES=0
 DO_UNINSTALL=0
 # ============================================================
@@ -54,13 +57,13 @@ mtproxy-ws-ins - установка MTProto-прокси (tg-ws-proxy + zapret).
 
 Одной строкой:
   curl -fsSL ${SELF_URL} | sudo bash
-  curl -fsSL ${SELF_URL} | sudo bash -s -- --port 443 --server yourserverxd --domain max.ru --cf-prefix node --dpi-bypass
+  curl -fsSL ${SELF_URL} | sudo bash -s -- --port 443 --server alt2.insage.ru --domain max.ru --cf-prefix node --dpi-bypass
 
 Флаги:
   --port N             порт MTProto (по умолч. 443)
   --server H           точка входа, server= в ссылке (серое облако -> VPS)
-  --domain D           Fake-TLS/маскировка, живой сайт != точки входа (по умолч. insage.ru)
-  --secret HEX         32-hex секрет (по умолч. генерируется)
+  --domain D           Fake-TLS/маскировка, живой сайт != точки входа (по умолч. max.ru)
+  --secret HEX         32-hex сикрет (по умолч. генерируется)
   --cfproxy-domain D   база CfProxy для исходящего (по умолч. база от --domain)
   --no-cfproxy-domain  использовать авто-домены движка
   --builtin-cfproxy    встроенные CfProxy-домены (без своей зоны; синоним --no-cfproxy-domain)
@@ -68,7 +71,9 @@ mtproxy-ws-ins - установка MTProto-прокси (tg-ws-proxy + zapret).
   --ws-keepalive SEC   интервал WS keepalive-пингов к Telegram, 0=выкл (по умолч. 30)
   --dpi-opts "..."     опции nfqws для тюнинга под TSPU (см. README)
   --dpi-bypass | --no-dpi-bypass   слой TCPMSS=536 + nfqws fake
-  --no-fake-tls        обычный MTProto (dd-секрет, без TLS-маскировки и SNI)
+  --no-fake-tls        обычный MTProto (dd-сикрет, без TLS-маскировки и SNI)
+  --log-level L        info|warning|error|off (off/error = без логов подключений)
+  --quiet              синоним --log-level error
   --yes                без вопросов (для пайпа)
   --uninstall          удалить всё установленное
 USAGE
@@ -97,6 +102,9 @@ while [[ $# -gt 0 ]]; do
     --dpi-bypass)        DPI_BYPASS=1; shift ;;
     --no-dpi-bypass)     DPI_BYPASS=0; shift ;;
     --no-fake-tls)       NO_FAKE_TLS=1; shift ;;
+    --log-level)         LOG_LEVEL="${2:?}"; shift 2 ;;
+    --log-level=*)       LOG_LEVEL="${1#*=}"; shift ;;
+    --quiet)             LOG_LEVEL="error"; shift ;;
     --yes|-y)            ASSUME_YES=1; shift ;;
     --uninstall)         DO_UNINSTALL=1; shift ;;
     -h|--help)           usage; exit 0 ;;
@@ -118,6 +126,8 @@ if [[ $DO_UNINSTALL -eq 1 ]]; then
   iptables -t mangle -D OUTPUT -p tcp --sport "${PORT}" -j TCPMSS --set-mss "$MSS" 2>/dev/null || true
   iptables -t mangle -D OUTPUT -p tcp --sport "${PORT}" -m conntrack --ctstate ESTABLISHED -j NFQUEUE --queue-num "$QNUM" --queue-bypass 2>/dev/null || true
   rm -rf "$APP_DIR" "$CONF_DIR"
+  rm -f /usr/local/bin/mtproxy-ws
+  rm -rf /usr/local/share/mtproxy-ws
   c_g "Готово. (Каталог $ZAPRET_DIR не трогаю — мог использоваться другими сервисами.)"
   exit 0
 fi
@@ -145,7 +155,7 @@ if [[ $RD -ge 0 ]]; then
     info "Fake-TLS выключен -> обычный MTProto (dd-ссылка)"
   fi
 
-  read -rp "Секрет — 32 hex без dd/ee (пусто = сгенерировать): " _v <&$RD || true
+  read -rp "Сикрет — 32 hex без dd/ee (пусто = сгенерировать): " _v <&$RD || true
   SECRET="${_v:-$SECRET}"
 
   read -rp "CfProxy: свой домен для node*-записей (пусто = встроенные домены движка): " _v <&$RD || true
@@ -161,6 +171,9 @@ if [[ $RD -ge 0 ]]; then
     read -rp "Включить обход DPI/TSPU (TCPMSS=536 + nfqws)? [Y/n]: " _v <&$RD || true
     case "${_v:-y}" in [Nn]*) DPI_BYPASS=0 ;; *) DPI_BYPASS=1 ;; esac
   fi
+
+  read -rp "Логировать подключения (IP клиентов, сессии, статистику)? [Y/n]: " _v <&$RD || true
+  case "${_v:-y}" in [Nn]*) LOG_LEVEL="error" ;; *) LOG_LEVEL="info" ;; esac
 fi
 
 [[ -z "$DPI_BYPASS" ]] && DPI_BYPASS=0
@@ -168,6 +181,8 @@ fi
 [[ -n "$DOMAIN" ]] || die "домен Fake-TLS не задан"
 [[ -z "$SERVER" ]] && SERVER="${PUBIP:-$DOMAIN}"
 [[ "$CF_PREFIX" =~ ^[a-zA-Z][a-zA-Z0-9-]*$ ]] || die "cf-prefix: буквы/цифры/дефис, начинается с буквы"
+LOG_LEVEL="$(printf '%s' "$LOG_LEVEL" | tr '[:upper:]' '[:lower:]')"
+case "$LOG_LEVEL" in info|warning|error|off) ;; *) die "log-level: info|warning|error|off" ;; esac
 
 if [[ $CFPROXY_DISABLE -eq 1 ]]; then
   CFPROXY_DOMAIN=""
@@ -190,9 +205,11 @@ info "python: $(python3 --version 2>&1)"
 
 c_y "[2/6] Движок tg-ws-proxy…"
 if [[ -d "${APP_DIR}/.git" ]]; then
-  git -C "$APP_DIR" fetch --depth 1 origin main -q && git -C "$APP_DIR" reset --hard origin/main -q
+  git -C "$APP_DIR" remote set-url origin "$REPO_URL" 2>/dev/null || true
+  git -C "$APP_DIR" fetch --depth 1 origin "$REPO_REF" -q && git -C "$APP_DIR" reset --hard FETCH_HEAD -q
 else
-  rm -rf "$APP_DIR"; git clone --depth 1 -q "$REPO_URL" "$APP_DIR"
+  rm -rf "$APP_DIR"; git clone --depth 1 --branch "$REPO_REF" -q "$REPO_URL" "$APP_DIR" \
+    || { rm -rf "$APP_DIR"; git clone --depth 1 -q "$REPO_URL" "$APP_DIR" && git -C "$APP_DIR" checkout -q "$REPO_REF"; }
 fi
 
 if [[ "$CF_PREFIX" != "kws" ]]; then
@@ -202,93 +219,28 @@ if [[ "$CF_PREFIX" != "kws" ]]; then
   info "CfProxy-префикс пропатчен: ${CF_PREFIX}{dc}.<домен>"
 fi
 
-# keepalive-патч (f4rceful fix/ws-keepalive-646): WS PING'и, чтобы сессии не рвались по idle.
-KEEPALIVE_OK=0
+# keepalive теперь нативный в форке (PR #925) — рантайм-патч не нужен
+KEEPALIVE_OK=1
+
+# патч уровня логов: читать MTPROXY_LOG_LEVEL из окружения (для --log-level/--quiet)
 if python3 - "$APP_DIR" <<'PYEOF'
 import sys, ast, os
-app = sys.argv[1]
-def patch(path, edits):
-    p = os.path.join(app, path)
-    s = open(p, encoding='utf-8').read()
-    for guard, find, repl in edits:
-        if guard in s:
-            continue
-        if find not in s:
-            print("anchor-miss:", path, file=sys.stderr); return False
-        s = s.replace(find, repl, 1)
-    ast.parse(s)                      # не пишем сломанный файл
+p = os.path.join(sys.argv[1], 'proxy/tg_ws_proxy.py')
+s = open(p, encoding='utf-8').read()
+if 'MTPROXY_LOG_LEVEL' not in s:
+    find = '    log_level = logging.DEBUG if args.verbose else logging.INFO'
+    repl = ("    log_level = logging.DEBUG if args.verbose else getattr(\n"
+            "        logging, os.environ.get('MTPROXY_LOG_LEVEL', 'INFO').upper(), logging.INFO)")
+    if find not in s:
+        print("log-anchor-miss", file=sys.stderr); sys.exit(1)
+    s = s.replace(find, repl, 1)
+    ast.parse(s)
     open(p, 'w', encoding='utf-8').write(s)
-    return True
-
-ok = True
-ok &= patch('proxy/config.py', [(
-    'ws_keepalive_interval',
-    '    proxy_protocol: bool = False\n',
-    '    proxy_protocol: bool = False\n    ws_keepalive_interval: float = 30.0\n',
-)])
-ok &= patch('proxy/raw_websocket.py', [(
-    'def send_ping',
-    '    async def recv(self) -> Optional[bytes]:',
-    "    async def send_ping(self, payload: bytes = b''):\n"
-    "        if self._closed:\n"
-    "            raise ConnectionError(\"WebSocket closed\")\n"
-    "        frame = self._build_frame(self.OP_PING, payload, mask=True)\n"
-    "        self.writer.write(frame)\n"
-    "        await self.writer.drain()\n\n"
-    "    async def recv(self) -> Optional[bytes]:",
-)])
-ok &= patch('proxy/bridge.py', [
-    ('_ws_keepalive',
-     'async def bridge_ws_reencrypt(reader, writer, ws: RawWebSocket, label,',
-     'async def _ws_keepalive(ws, interval: float):\n'
-     '    if interval <= 0:\n'
-     '        return\n'
-     '    try:\n'
-     '        while True:\n'
-     '            await asyncio.sleep(interval)\n'
-     '            await ws.send_ping()\n'
-     '    except (asyncio.CancelledError, ConnectionError, OSError):\n'
-     '        return\n\n\n'
-     'async def bridge_ws_reencrypt(reader, writer, ws: RawWebSocket, label,'),
-    ('keepalive = asyncio.ensure_future',
-     '    tasks = [asyncio.create_task(tcp_to_ws()),\n'
-     '             asyncio.create_task(ws_to_tcp())]\n'
-     '    try:\n'
-     '        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)\n'
-     '    finally:\n'
-     '        for t in tasks:\n'
-     '            t.cancel()\n'
-     '        for t in tasks:\n',
-     '    tasks = [asyncio.create_task(tcp_to_ws()),\n'
-     '             asyncio.create_task(ws_to_tcp())]\n'
-     '    keepalive = asyncio.ensure_future(\n'
-     '        _ws_keepalive(ws, proxy_config.ws_keepalive_interval))\n'
-     '    try:\n'
-     '        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)\n'
-     '    finally:\n'
-     '        keepalive.cancel()\n'
-     '        for t in tasks:\n'
-     '            t.cancel()\n'
-     '        for t in (*tasks, keepalive):\n'),
-])
-ok &= patch('proxy/tg_ws_proxy.py', [
-    ('--ws-keepalive',
-     '    args = ap.parse_args()\n',
-     "    ap.add_argument('--ws-keepalive', type=float, default=30.0,\n"
-     "                    metavar='SEC', help='Seconds between WS keepalive "
-     "PINGs (0 disables).')\n    args = ap.parse_args()\n"),
-    ('ws_keepalive_interval = max',
-     '    proxy_config.proxy_protocol = args.proxy_protocol\n',
-     '    proxy_config.proxy_protocol = args.proxy_protocol\n'
-     '    proxy_config.ws_keepalive_interval = max(0.0, args.ws_keepalive)\n'),
-])
-sys.exit(0 if ok else 1)
 PYEOF
 then
-  KEEPALIVE_OK=1
-  info "keepalive-патч применён (--ws-keepalive=${WS_KEEPALIVE}s)"
+  info "лог-уровень управляем через конфиг (LOG_LEVEL=${LOG_LEVEL})"
 else
-  c_y "  ⚠  keepalive-патч не применился (апстрим изменился) — ставлю без него"
+  c_y "  ⚠  патч лог-уровня не применился — LOG_LEVEL может не действовать"
 fi
 
 python3 -m venv "$VENV_DIR"
@@ -308,6 +260,7 @@ CFPROXY_DOMAIN=${CFPROXY_DOMAIN}
 CF_PREFIX=${CF_PREFIX}
 DPI_BYPASS=${DPI_BYPASS}
 NO_FAKE_TLS=${NO_FAKE_TLS}
+LOG_LEVEL=${LOG_LEVEL}
 WS_KEEPALIVE=${WS_KEEPALIVE}
 KEEPALIVE_OK=${KEEPALIVE_OK}
 NFQWS_OPTS='${NFQWS_OPTS}'
@@ -326,6 +279,12 @@ cat > "$RUN_WRAPPER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 source "${CONF_FILE}"
+case "\${LOG_LEVEL:-info}" in
+  warning) export MTPROXY_LOG_LEVEL=WARNING ;;
+  error)   export MTPROXY_LOG_LEVEL=ERROR ;;
+  off)     export MTPROXY_LOG_LEVEL=CRITICAL ;;
+  *)       export MTPROXY_LOG_LEVEL=INFO ;;
+esac
 exec "${VENV_DIR}/bin/python" -m proxy.tg_ws_proxy \\
   --host 0.0.0.0 \\
   --port "\${PORT}" \\
@@ -360,6 +319,69 @@ PrivateTmp=yes
 [Install]
 WantedBy=multi-user.target
 EOF
+
+# команда-менеджер mtproxy-ws + копия установщика для `update`
+mkdir -p /usr/local/share/mtproxy-ws
+if [[ -f "${BASH_SOURCE[0]:-}" ]] && head -1 "${BASH_SOURCE[0]}" 2>/dev/null | grep -q bash; then
+  cp "${BASH_SOURCE[0]}" /usr/local/share/mtproxy-ws/install.sh 2>/dev/null || true
+fi
+# запущено через bash <(curl ...) — файла нет, докачаем для будущего `mtproxy-ws update`
+[[ -f /usr/local/share/mtproxy-ws/install.sh ]] || \
+  curl -fsSL "$SELF_URL" -o /usr/local/share/mtproxy-ws/install.sh 2>/dev/null || true
+cat > /usr/local/bin/mtproxy-ws <<'MGR'
+#!/usr/bin/env bash
+set -euo pipefail
+CONF=/etc/mtproxy-ws/proxy.conf
+SVC=mtproxy-ws.service
+SVC_NFQWS=mtproxy-ws-nfqws.service
+SVC_IPT=mtproxy-ws-iptables.service
+INSTALLER=/usr/local/share/mtproxy-ws/install.sh
+[[ $EUID -eq 0 ]] || { echo "нужен root (sudo mtproxy-ws ...)"; exit 1; }
+[[ -f $CONF ]] || { echo "конфиг $CONF не найден — прокси не установлен"; exit 1; }
+# shellcheck source=/dev/null
+source "$CONF"
+
+UNITS=("$SVC")
+systemctl list-unit-files --no-legend 2>/dev/null | grep -q "^${SVC_NFQWS}" && UNITS+=("$SVC_NFQWS" "$SVC_IPT")
+
+hexenc(){ printf '%s' "$1" | od -An -tx1 | tr -d ' \n'; }
+build_link(){
+  local sec
+  if [[ "${NO_FAKE_TLS:-0}" == "1" ]]; then sec="dd${SECRET}"
+  else sec="ee${SECRET}$(hexenc "$DOMAIN")"; fi
+  echo "tg://proxy?server=${SERVER}&port=${PORT}&secret=${sec}"
+  echo "https://t.me/proxy?server=${SERVER}&port=${PORT}&secret=${sec}"
+}
+
+case "${1:-status}" in
+  status)  systemctl status "${UNITS[@]}" --no-pager || true
+           echo; journalctl -u "$SVC" -n 1 --no-pager | grep -i stats || true ;;
+  start)   systemctl start   "${UNITS[@]}"; echo "запущено" ;;
+  stop)    systemctl stop    "${UNITS[@]}"; echo "остановлено" ;;
+  restart) systemctl restart "${UNITS[@]}"; echo "перезапущено" ;;
+  link)    build_link ;;
+  qr)      command -v qrencode >/dev/null || { echo "поставь qrencode: apt install -y qrencode"; exit 1; }
+           build_link | head -1 | qrencode -t ANSIUTF8 ;;
+  logs)    shift; journalctl -u "$SVC" -f "$@" ;;
+  edit)    "${EDITOR:-nano}" "$CONF"; systemctl restart "$SVC"; echo "сохранено, перезапущено" ;;
+  rotate)
+    NEW="$(openssl rand -hex 16)"
+    sed -i "s/^SECRET=.*/SECRET=${NEW}/" "$CONF"
+    SECRET="$NEW"; systemctl restart "$SVC"
+    echo "Новый сикрет: $NEW"
+    echo "Новая ссылка (старая больше НЕ работает):"; build_link ;;
+  update)
+    [[ -f "$INSTALLER" ]] || { echo "сохранённый install.sh не найден — переустанови вручную"; exit 1; }
+    a=(--yes --secret "$SECRET" --port "$PORT" --server "$SERVER" --cf-prefix "$CF_PREFIX"
+       --ws-keepalive "$WS_KEEPALIVE" --log-level "${LOG_LEVEL:-info}" --dpi-opts "$NFQWS_OPTS")
+    [[ "${NO_FAKE_TLS:-0}" == "1" ]] && a+=(--no-fake-tls) || a+=(--domain "$DOMAIN")
+    [[ -n "${CFPROXY_DOMAIN:-}" ]] && a+=(--cfproxy-domain "$CFPROXY_DOMAIN") || a+=(--builtin-cfproxy)
+    [[ "${DPI_BYPASS:-0}" == "1" ]] && a+=(--dpi-bypass) || a+=(--no-dpi-bypass)
+    bash "$INSTALLER" "${a[@]}" ;;
+  *) echo "mtproxy-ws {status|start|stop|restart|link|qr|logs|edit|rotate|update}"; exit 1 ;;
+esac
+MGR
+chmod +x /usr/local/bin/mtproxy-ws
 
 c_y "[5/6] Слой обхода DPI/TSPU…"
 if [[ "$DPI_BYPASS" -eq 1 ]]; then
@@ -456,6 +478,7 @@ else
 fi
 echo "  DPI:          $([[ $DPI_BYPASS -eq 1 ]] && echo 'включён (TCPMSS+nfqws)' || echo 'выключен')"
 echo "  Keepalive:    $([[ $KEEPALIVE_OK -eq 1 ]] && echo "WS PING каждые ${WS_KEEPALIVE}s" || echo 'нет (патч не применён)')"
+echo "  Логи:         LOG_LEVEL=${LOG_LEVEL}$([[ "$LOG_LEVEL" != "info" ]] && echo ' (логи подключений отключены)')"
 echo
 echo "  Ссылка для Telegram:"
 c_y "  ${LINK}"
@@ -472,6 +495,7 @@ if [[ -n "$CFPROXY_DOMAIN" ]]; then
   echo
 fi
 echo "  Логи:    journalctl -u ${SVC_PROXY} -f   |   /var/log/mtproxy-ws.log"
+echo "  Менеджер: mtproxy-ws {status|start|stop|restart|link|qr|logs|edit|rotate|update}"
 echo "  Снести:  curl -fsSL ${SELF_URL} | sudo bash -s -- --uninstall"
 c_g "════════════════════════════════════════════════════════════"
 
