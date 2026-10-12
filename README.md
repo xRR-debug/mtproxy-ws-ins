@@ -74,6 +74,15 @@ curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.
 | `--ws-keepalive SEC` | WS keepalive-пинги, 0=выкл | `30` |
 | `--dpi-bypass` / `--no-dpi-bypass` | слой TCPMSS+nfqws | спрашивается / выкл в пайпе |
 | `--dpi-opts "..."` | опции nfqws под ТСПУ | combo из mtproxy-setup |
+| `--log-level L` / `--quiet` | `info\|warning\|error\|off` | `info` |
+| `--web-proxy` / `--no-web-proxy` | WEB-прокси (см. ниже) | спрашивается / выкл в пайпе |
+| `--web-host H` | домен WEB-прокси (A → VPS, серое облако) | — (обязателен) |
+| `--web-email E` | e-mail для Let's Encrypt | пусто |
+| `--web-base-path P\|none` | путь relay (`none` = корень) | случайный, сохраняется |
+| `--web-carrier M` | `https\|https-lanes\|websocket\|websocket-lanes` | `https` |
+| `--web-backend-port N` | локальный порт бэкенда (127.0.0.1) | `12398` |
+| `--web-site-dir DIR` / `--web-site-upstream URL` | свой сайт-обложка | генерируется |
+| `--web-relay-ref REF` | коммит `telegramdesktop/tproxy-server` | закреплённый |
 | `--yes` | без вопросов | — |
 | `--uninstall` | удалить всё | — |
 
@@ -111,6 +120,61 @@ A-записи (**оранжевое облако**), фиксированные
 
 Ссылки различаются: Fake-TLS → `secret=ee<secret><домен_hex>`; обычный → `secret=dd<secret>`.
 
+## WEB-прокси (Telegram Desktop 7.1+)
+
+В Telegram Desktop 7.1 появился новый тип прокси — **WEB-прокси** (`t.me/webproxy`). Клиент делает обычный MTProxy-хендшейк (obfuscated2 с сикретом), но все TCP-соединения гонит через скрытый WebView по **HTTPS к твоему домену**. Для DPI это выглядит как браузер на обычном сайте с валидным сертификатом. Серверная часть — официальный relay [`telegramdesktop/tproxy-server`](https://github.com/telegramdesktop/tproxy-server).
+
+Upstream ставит за relay официальный MTProxy, но на RU VPS он не достучится до DC. Поэтому здесь бэкендом служит **второй экземпляр tg-ws-proxy** на `127.0.0.1`, без Fake-TLS, с тем же сикретом. Дальше трафик идёт тем же путём: WSS/CfProxy.
+
+```
+Telegram Desktop 7.1+
+   │  https://t.me/webproxy?server=<web-host>%2F<base-path>&secret=<…>
+   ▼
+VPS :443  Caddy (Let's Encrypt, <web-host>)          mtproxy-ws-caddy
+   ▼
+127.0.0.1:18080  tproxy-server (relay, сайт-обложка)  mtproxy-ws-relay
+   ▼  по TCP-соединению на каждый поток клиента
+127.0.0.1:12398  tg-ws-proxy (без Fake-TLS)           mtproxy-ws-web-backend
+   ▼
+WebSocket (WSS) / CfProxy -> Telegram DC
+```
+
+Требования:
+
+- **Домен** (`--web-host`) с A-записью на IP VPS, **серое облако** (без CDN/Cloudflare-прокси): сертификат выпускает сам Caddy.
+- Свободные **80 и 443**. Caddy занимает 443, поэтому MTProto уходит на другой порт (например `--port 8443`). В интерактивном режиме скрипт спросит сам.
+- amd64/arm64. Relay собирается из исходников закреплённого коммита. Go, если его нет, ставится временно и удаляется после сборки. Caddy берётся из официального релиза, sha512 сверяется.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --yes \
+  --secret <32-hex> \
+  --port 8443 --server <твой-домен-или-IP> --domain max.ru \
+  --builtin-cfproxy --dpi-bypass \
+  --web-proxy --web-host web.example.com --web-email you@example.com
+```
+
+Скрипт печатает обе ссылки, MTProto и WEB. Позже их можно получить через `mtproxy-ws link`, только WEB — через `mtproxy-ws weblink`, QR — через `mtproxy-ws qr web`.
+
+**Base path.** По умолчанию relay живёт по случайному пути (`https://<web-host>/<слаг>/`), и без этого пути сканер видит только сайт-обложку. В ссылке тогда `server=<host>%2F<слаг>`, а сикрет имеет вид `base64url(0x70 ‖ secret)`. Клиенты без поддержки base path не подключатся к такой ссылке, а предложат обновиться. Для совместимости со старыми 7.1.x поставь `--web-base-path none`: relay встанет в корень, а сикрет останется обычным hex. Смена base path = перевыпуск ссылки.
+
+**Сайт-обложка.** На домене relay должен открываться «живой» сайт. Одинаковый шаблон у всех установок легко стал бы сигнатурой, поэтому скрипт генерирует случайную страничку в `/opt/mtproxy-ws-web/site`. Её можно заменить своей статикой (`--web-site-dir DIR`, нужен `index.html`) или своим приложением на loopback (`--web-site-upstream http://127.0.0.1:3000`).
+
+**Carrier.** `https` (по умолчанию) — long-poll запросы, самый «браузерный» вариант. `websocket` экономнее, но заметнее. Варианты `*-lanes` разносят потоки по нескольким соединениям.
+
+**Fake-TLS + WEB.** Можно поставить `--domain` равным `--web-host`. Тогда Fake-TLS маскируется под твой же реальный сайт с валидным сертификатом, а не под чужой. Петли нет: MTProto слушает 8443, а маскировка уходит на :443 к Caddy.
+
+Файлы и сервисы:
+
+| Что | Где |
+|---|---|
+| конфиг relay, профиль, ключ токенов | `/etc/mtproxy-ws/web/{config.json,profiles.json,token.key}` |
+| Caddyfile | `/etc/mtproxy-ws/caddy/Caddyfile` |
+| бинарники, сайт | `/opt/mtproxy-ws-web/{bin,site}` |
+| сертификаты | `/var/lib/mtproxy-ws-caddy` |
+| сервисы | `mtproxy-ws-web-backend`, `mtproxy-ws-relay`, `mtproxy-ws-caddy` |
+
+Системный Caddy/nginx скрипт не трогает. Если на 80/443 уже кто-то слушает, установка остановится с сообщением. `mtproxy-ws rotate` меняет сикрет сразу для обеих ссылок.
+
 ## Управление, автозапуск
 
 Автозапуск настроен (`systemctl enable --now`).
@@ -125,7 +189,9 @@ systemctl stop|disable mtproxy-ws
 curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --uninstall
 ```
 
-Конфиг: `/etc/mtproxy-ws/proxy.conf` (после правки → `systemctl restart mtproxy-ws`). Wrapper: `/opt/tg-ws-proxy/run-server.sh`.
+Конфиг: `/etc/mtproxy-ws/proxy.conf` (после правки → `systemctl restart mtproxy-ws`). Wrapper: `/opt/tg-ws-proxy/run-server.sh` (`run-server.sh web` = бэкенд WEB-прокси).
+
+Менеджер: `mtproxy-ws {status|start|stop|restart|link|weblink|webinfo|qr [web]|logs [web]|edit|rotate|update}`. С включённым WEB-прокси `start/stop/restart/status` охватывают и его сервисы.
 
 ## Диагностика
 
@@ -150,6 +216,16 @@ done
 | `masked` растёт | сервер в Fake-TLS режиме, а клиент с `dd`-ссылкой (или наоборот) |
 | `bad handshake` / на устройстве старая ссылка - удали все записи прокси, добавь актуальную |
 | `timeout during handshake` | вход режется DPI: попробуй `--no-fake-tls`, смену порта/`--domain`; сними дамп - доходит ли `[P.]` |
+| WEB: клиент пишет «неподдерживаемый тип прокси» | старый Telegram Desktop: обнови до 7.1.3+ или переустанови с `--web-base-path none` |
+| WEB: сайт не открывается по HTTPS | A-запись не на VPS / оранжевое облако / закрыт 80: `journalctl -u mtproxy-ws-caddy` |
+| WEB: сайт открывается, прокси нет | `curl 127.0.0.1:18081/readyz` и `mtproxy-ws logs web`; бэкенд в `/var/log/mtproxy-ws-web.log` |
+
+```bash
+# WEB-прокси
+curl -sS http://127.0.0.1:18081/readyz; echo        # relay видит бэкенд
+curl -sSI https://<web-host>/ | head -1               # сайт-обложка + сертификат
+systemctl status mtproxy-ws-web-backend mtproxy-ws-relay mtproxy-ws-caddy --no-pager
+```
 
 ### Zapret
 
