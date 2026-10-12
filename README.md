@@ -1,6 +1,6 @@
 # mtproxy-ws-ins
 
-- **Движок** — [`Flowseal/tg-ws-proxy`](https://github.com/Flowseal/tg-ws-proxy): принимает MTProto и тоннелирует его в Telegram через **WebSocket (WSS)** к дата-центрам, с фолбэком через CfProxy (Cloudflare). Своих промежуточных серверов Telegram не требует.
+- **Движок** — форк [`xRR-debug/tg-ws-proxy`](https://github.com/xRR-debug/tg-ws-proxy) (на основе [`Flowseal/tg-ws-proxy`](https://github.com/Flowseal/tg-ws-proxy)): принимает MTProto и тоннелирует его в Telegram через **WebSocket (WSS)** к дата-центрам, с фолбэком через CfProxy (Cloudflare). Своих промежуточных серверов Telegram не требует.
 
 Зачем? На RU VPS(IP) прямой путь к дата-центрам Telegram обычно заблокирован на ТСПУ. Проект уводит исходящий трафик в Telegram через **зону Cloudflare**, а вход для клиентов маскирует Fake-TLS либо отдаёт обычным MTProto.
 
@@ -23,15 +23,16 @@ WebSocket (WSS) -> Telegram DC
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/xRR-debug/mtproxy-ws-ins/main/install-mtproxy.sh -o install.sh && sudo bash install.sh
-
 ```
 
 Голый вызов спросит параметры в терминале. Любой переданный флаг => неинтерактивный режим.
 
+Скрипт ставит движок в `/opt/tg-ws-proxy` с отдельным venv и Python-зависимостями сервера (`cryptography`, `certifi`, `httpx[http2]`, как в Dockerfile форка). Повторный запуск = обновление: конфиг перезаписывается переданными флагами, поэтому чтобы ссылка не сменилась, передавай тот же `--secret`.
+
 Пример конфига MTProto без Fake-TLS, своя зона CfProxy, закреплённый сикрет
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --yes \
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/mtproxy-ws-ins/main/install-mtproxy.sh | sudo bash -s -- --yes \
   --secret <32-hex> \
   --port 443 --server <твой-домен-или-IP> \
   --cfproxy-domain <твой домен проксируемый в CF> --cf-prefix node \
@@ -40,7 +41,7 @@ curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.
 
 Пример конфига MTProto без Fake-TLS, встроенные CfProxy-домены (свою Cloudflare/DNS поднимать не нужно)
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --yes \
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/mtproxy-ws-ins/main/install-mtproxy.sh | sudo bash -s -- --yes \
   --secret <32-hex> \
   --port 443 --server <твой-домен-или-IP> \
   --builtin-cfproxy --no-fake-tls --dpi-bypass
@@ -49,7 +50,7 @@ curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.
 
 Пример конфига MTProto с Fake-TLS (маскировка под --domain, ee-сикрет) - без --no-fake-tls, нужен живой HTTPS-сайт в --domain
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --yes \
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/mtproxy-ws-ins/main/install-mtproxy.sh | sudo bash -s -- --yes \
   --secret <32-hex> \
   --port 443 --server <твой-домен-или-IP> --domain max.ru \
   --cfproxy-domain <твой домен проксируемый в CF> --cf-prefix node \
@@ -70,8 +71,8 @@ curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.
 | `--cfproxy-domain D` | база CfProxy для исходящего | база от `--domain` |
 | `--no-cfproxy-domain` | авто-домены tg-ws-proxy | — |
 | `--builtin-cfproxy` | встроенные CfProxy-домены (без своей зоны) | — |
-| `--cf-prefix P` | префикс CfProxy-субдоменов | `node` |
-| `--ws-keepalive SEC` | WS keepalive-пинги, 0=выкл | `30` |
+| `--cf-prefix P` | префикс CfProxy-субдоменов | `kws` |
+| `--ws-keepalive SEC` | WS keepalive-пинги, 0=выкл; применяется, только если движок поддерживает флаг | `30` |
 | `--dpi-bypass` / `--no-dpi-bypass` | слой TCPMSS+nfqws | спрашивается / выкл в пайпе |
 | `--dpi-opts "..."` | опции nfqws под ТСПУ | combo из mtproxy-setup |
 | `--log-level L` / `--quiet` | `info\|warning\|error\|off` | `info` |
@@ -146,7 +147,7 @@ WebSocket (WSS) / CfProxy -> Telegram DC
 - amd64/arm64. Relay собирается из исходников закреплённого коммита. Go, если его нет, ставится временно и удаляется после сборки. Caddy берётся из официального релиза, sha512 сверяется.
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --yes \
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/mtproxy-ws-ins/main/install-mtproxy.sh | sudo bash -s -- --yes \
   --secret <32-hex> \
   --port 8443 --server <твой-домен-или-IP> --domain max.ru \
   --builtin-cfproxy --dpi-bypass \
@@ -186,7 +187,7 @@ journalctl -u mtproxy-ws -f | grep stats     # трафик: down/up
 systemctl restart mtproxy-ws                 # сбрасывает подвисшие CfProxy-сессии
 systemctl stop|disable mtproxy-ws
 
-curl -fsSL https://raw.githubusercontent.com/xRR-debug/tg-ws-proxy/main/install.sh | sudo bash -s -- --uninstall
+curl -fsSL https://raw.githubusercontent.com/xRR-debug/mtproxy-ws-ins/main/install-mtproxy.sh | sudo bash -s -- --uninstall
 ```
 
 Конфиг: `/etc/mtproxy-ws/proxy.conf` (после правки → `systemctl restart mtproxy-ws`). Wrapper: `/opt/tg-ws-proxy/run-server.sh` (`run-server.sh web` = бэкенд WEB-прокси).
@@ -214,7 +215,9 @@ done
 |---|---|
 | `stats` норм, но `down` застыл при `active>0` | CfProxy лёг: проверь Cloudflare **Flexible**, затем `restart` |
 | `masked` растёт | сервер в Fake-TLS режиме, а клиент с `dd`-ссылкой (или наоборот) |
-| `bad handshake` / на устройстве старая ссылка - удали все записи прокси, добавь актуальную |
+| `bad handshake` | на устройстве старая ссылка: удали все записи прокси, добавь актуальную |
+| `No module named …` при старте | старый установщик не доставил зависимости движка: перезапусти актуальный `install-mtproxy.sh` |
+| `unrecognized arguments: --ws-keepalive` | старый установщик, а форк флаг не поддерживает: перезапусти актуальный `install-mtproxy.sh` |
 | `timeout during handshake` | вход режется DPI: попробуй `--no-fake-tls`, смену порта/`--domain`; сними дамп - доходит ли `[P.]` |
 | WEB: клиент пишет «неподдерживаемый тип прокси» | старый Telegram Desktop: обнови до 7.1.3+ или переустанови с `--web-base-path none` |
 | WEB: сайт не открывается по HTTPS | A-запись не на VPS / оранжевое облако / закрыт 80: `journalctl -u mtproxy-ws-caddy` |
